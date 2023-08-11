@@ -7,12 +7,17 @@
 #include <thread>
 #include <future>
 #include <random>
-#include "FuncCompose.h"
+#include "Map.h"
 using namespace std;
 
 // перечень операций, поддерживаемых вычислителем.
 enum class OPERATOR {
 	ILLEGAL, PLUS, MINUS, MUL, DIV, UNARY_PLUS, UNARY_MINUS
+};
+
+// Вид узла: операция или значение.
+enum class ExprKind {
+	ILLEGAL_EXPR, OPERATOR, VALUE
 };
 
 // Хранит стандартное число с плавающей точкой.
@@ -140,8 +145,116 @@ public:
 	} 
 };
 
+struct EXPR_ITEM {
+	ExprKind knd;
+	double value;
+	OPERATOR op;
+
+	EXPR_ITEM(): op(OPERATOR::ILLEGAL), value(0), knd(ExprKind::ILLEGAL_EXPR) {}
+	bool setOperator(OPERATOR op) {
+		this->op = op;
+		this->knd = ExprKind::OPERATOR;
+		return true;
+	}
+	bool setValue(double value) {
+		this->knd = ExprKind::VALUE;
+		this->value = value;
+		return true;
+	}
+	string toString() {
+		DumpContents();
+		return "";
+	}
+private:
+	void DumpContents() { /* Код для краткости опустим */ }
+};
+
+// Разглаживающий поесетитель
+class FlattenVisitor : public IExprVisitor {
+	list<EXPR_ITEM> ils;
+	
+	EXPR_ITEM MakeListItem(double num) {
+		EXPR_ITEM temp;
+		temp.setValue(num);
+		return temp;
+	}
+	EXPR_ITEM MakeListItem(OPERATOR op) {
+		EXPR_ITEM temp;
+		temp.setOperator(op);
+		return temp;
+	}
+public:
+	FlattenVisitor() {}
+
+	list<EXPR_ITEM> FlattenedExpr() { return ils; }
+	
+	double Visit(Number& num) {
+		ils.push_back(MakeListItem(num.getNUM()));
+		return 42;
+	}
+	double Visit(BinaryExpr& bin) {
+		bin.getLeft().accept(*this);
+		bin.getRight().accept(*this);
+		ils.push_back(MakeListItem(bin.getOP()));
+		return 42;
+	}
+	double Visit(UnaryExpr& un) {
+		un.getRight().accept(*this);
+		ils.push_back(MakeListItem(un.getOP()));
+		return 42;
+	}
+};
+
+list<EXPR_ITEM> ExprList(Expr* r) {
+	unique_ptr<FlattenVisitor> fl(new FlattenVisitor());
+	r->accept(*fl);
+	return fl->FlattenedExpr();
+}
+
+// Стек для вычисления выражений в обратной польской записи
+class DoubleStack : public stack<double> {
+public:
+	DoubleStack() {}
+	void Push(double a) { this->push(a); }
+	double Pop() {
+		double a = this->top();
+		this->pop();
+		return a;
+	}
+};
+
+// Итеративная обработка компонентов выражения
+double Evaluate(list<EXPR_ITEM> ls) {
+	DoubleStack stk;
+	double n;
+	for(EXPR_ITEM s : ls) {
+		if(s.knd == ExprKind::VALUE) 
+			stk.Push(s.value);
+		else if(s.op == OPERATOR::PLUS)
+			stk.Push(stk.Pop() + stk.Pop());
+		else if(s.op == OPERATOR::MINUS)
+			stk.Push(stk.Pop() - stk.Pop());
+		else if(s.op == OPERATOR::DIV) {
+			n = stk.Pop();
+			stk.Push(stk.Pop() / n);
+		}
+		else if(s.op == OPERATOR::MUL) 
+			stk.Push(stk.Pop() * stk.Pop());
+		else if(s.op == OPERATOR::UNARY_MINUS)
+			stk.Push(-stk.Pop());
+	}
+	return stk.Pop();
+}
+
+// Превратить дерево в список и сразу подать его на вычислитель
+double Evaluate(Expr* ex) { return Evaluate(ExprList(ex)); }
+
+void Iterate(list<EXPR_ITEM>& s) {
+	for(auto n : s) { std::cout << n.toString() << "\n"; }
+}
+
 int main() {
-	unique_ptr<Expr> a( 
+	/*unique_ptr<Expr> a( 
 			new BinaryExpr( 
 				new Number(10.0), 
 				new Number(20.0), 
@@ -155,5 +268,16 @@ int main() {
 	unique_ptr<IExprVisitor> exp( new ReversePolishEvaluator() );
 	cout << "Выражение в постфиксной записи: " << endl;
 	a->accept(*exp);
+	*/
+
+	unique_ptr<Expr> a(
+			new BinaryExpr(
+				new Number(10.0),
+				new Number(20.0),
+				OPERATOR::PLUS
+				)
+			);
+	double result = Evaluate(&(*a));
+	cout << result << endl;
 	return 0;
 }
